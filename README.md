@@ -1,7 +1,7 @@
 # skillex: skill extraction from job postings
 
 Fine-tunes a transformer to extract **skills** and **knowledge** spans from job ads,
-then ships it: FastAPI + Docker service, Prometheus metrics, CI with an eval gate,
+then ships it ([model on the Hub](https://huggingface.co/srish327/deberta-v3-skillspan-crf)): FastAPI + Docker service, Prometheus metrics, CI with an eval gate,
 and a live Gradio demo on Hugging Face Spaces.
 
 **Research question:** does domain-adapted pretraining (JobBERT) beat generic BERT on skill extraction?

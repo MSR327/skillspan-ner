@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import torch
 from transformers import AutoModelForTokenClassification, AutoTokenizer
 
@@ -7,12 +9,42 @@ from skillex.crf import load_crfs
 from skillex.decode import decode_head
 from skillex.labels import NUM_BIO, TYPES, bio_ids_to_tags, spans_from_tags
 
+# SkillSpan's training words split punctuation off ("AWS" "," not "AWS,"), so split raw
+# text the same way before tokenizing; otherwise spans swallow commas and full stops.
+_WORD = re.compile(r"\w+(?:['’.\-]\w+)*|\S")
+
+
+def split_words(text: str) -> list[tuple[int, int]]:
+    """Char (start, end) of each word: runs of word chars (keeping "Node.js", "e-mail") or single symbols."""
+    return [m.span() for m in _WORD.finditer(text)]
+
+
+def split_sentences(text: str, words: list[tuple[int, int]]) -> list[list[int]]:
+    """Group word indices into sentences: break after . ! ? or at a newline.
+
+    The model was trained on single sentences; feeding a whole multi-sentence posting
+    at once makes it miss most spans, so each sentence is tagged on its own.
+    """
+    sents, cur = [], []
+    for i, (a, b) in enumerate(words):
+        if cur and "\n" in text[words[cur[-1]][1] : a]:
+            sents.append(cur)
+            cur = []
+        cur.append(i)
+        if text[a:b] in {".", "!", "?"}:
+            sents.append(cur)
+            cur = []
+    if cur:
+        sents.append(cur)
+    return sents
+
 
 class SkillExtractor:
     """Extract SKILL and KNOWLEDGE spans (possibly overlapping) from raw text.
 
-    Long texts are split into overlapping windows; each word takes its
-    prediction from the window where it sits farthest from an edge (most context).
+    Text is split into sentences (the training unit) and tagged as one batch.
+    A sentence longer than the model's limit is split into overlapping windows; each
+    word takes its prediction from the window where it sits farthest from an edge.
     Each word is labeled by its first subword, matching training.
     """
 
@@ -32,38 +64,51 @@ class SkillExtractor:
 
     @torch.inference_mode()
     def extract(self, text: str) -> dict:
+        words = split_words(text)
+        if not words:
+            return {"skills": [], "knowledge": [], "spans": []}
+        sents = split_sentences(text, words)
         enc = self.tokenizer(
-            text,
+            [[text[a:b] for a, b in (words[i] for i in sent)] for sent in sents],
+            is_split_into_words=True,
             truncation=True,
             max_length=self.max_length,
             stride=self.stride,
             return_overflowing_tokens=True,
-            return_offsets_mapping=True,
             padding=True,
             return_tensors="pt",
         )
-        offsets = enc.pop("offset_mapping")
-        enc.pop("overflow_to_sample_mapping", None)
+        window_sent = enc.pop("overflow_to_sample_mapping").tolist()
         probs = self.model(**{k: v.to(self.device) for k, v in enc.items()}).logits.cpu()
 
-        char_span: dict[int, list[int]] = {}  # word -> [char_start, char_end]
-        best: dict[int, tuple[int, list]] = {}  # word -> (edge distance, [(bio_id, prob) per head])
+        best: dict[int, tuple[int, list]] = {}  # global word -> (edge distance, logits)
         for w in range(probs.shape[0]):
+            sent = sents[window_sent[w]]
             word_ids = enc.word_ids(w)
             real = [t for t, wid in enumerate(word_ids) if wid is not None]
             for rank, t in enumerate(real):
                 wid = word_ids[t]
-                s, e = offsets[w, t].tolist()
-                cs = char_span.setdefault(wid, [s, e])
-                cs[0], cs[1] = min(cs[0], s), max(cs[1], e)
                 if word_ids[t - 1] == wid:  # continuation subword: no prediction
                     continue
+                gid = sent[wid]
                 edge = min(rank, len(real) - 1 - rank)
-                if wid in best and best[wid][0] >= edge:
+                if gid in best and best[gid][0] >= edge:
                     continue
-                best[wid] = (edge, probs[w, t])
+                best[gid] = (edge, probs[w, t])
 
-        order = sorted(best)
+        spans = []
+        for sent in sents:
+            spans += self._decode_sentence(text, words, [i for i in sent if i in best], best)
+        spans.sort(key=lambda s: (s["start"], s["type"]))
+        return {
+            "skills": sorted({s["text"] for s in spans if s["type"] == "SKILL"}),
+            "knowledge": sorted({s["text"] for s in spans if s["type"] == "KNOWLEDGE"}),
+            "spans": spans,
+        }
+
+    def _decode_sentence(self, text, words, order, best) -> list[dict]:
+        if not order:
+            return []
         spans = []
         for h, etype in enumerate(TYPES):
             head = torch.stack([best[i][1][h * NUM_BIO : (h + 1) * NUM_BIO] for i in order])
@@ -71,7 +116,7 @@ class SkillExtractor:
             ids = decode_head(head.numpy(), self.decode, self.crfs[h] if self.crfs else None)
             tags = bio_ids_to_tags(ids, etype)
             for s in spans_from_tags([""] * len(order), tags):
-                c0, c1 = char_span[order[s["start"]]][0], char_span[order[s["end"] - 1]][1]
+                c0, c1 = words[order[s["start"]]][0], words[order[s["end"] - 1]][1]
                 score = sum(float(word_probs[j, ids[j]]) for j in range(s["start"], s["end"]))
                 spans.append(
                     {
@@ -82,9 +127,4 @@ class SkillExtractor:
                         "score": round(score / (s["end"] - s["start"]), 4),
                     }
                 )
-        spans.sort(key=lambda s: (s["start"], s["type"]))
-        return {
-            "skills": sorted({s["text"] for s in spans if s["type"] == "SKILL"}),
-            "knowledge": sorted({s["text"] for s in spans if s["type"] == "KNOWLEDGE"}),
-            "spans": spans,
-        }
+        return spans

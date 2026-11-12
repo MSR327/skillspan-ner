@@ -67,3 +67,23 @@ def test_span_scores_partial_boundary_is_wrong():
     logits = _logits_for([1, 2, 0], [0, 0, 0])
     m = span_scores(logits, labels)
     assert m["f1_skill"] == 0.0 and m["recall_skill"] == 0.0
+
+
+def test_split_words_matches_skillspan_style():
+    from skillex.predict import split_words
+
+    text = "Python, AWS and Node.js; mentor juniors."
+    assert [text[a:b] for a, b in split_words(text)] == [
+        "Python", ",", "AWS", "and", "Node.js", ";", "mentor", "juniors", ".",
+    ]
+
+
+def test_split_sentences_breaks_on_punctuation_and_newlines():
+    from skillex.predict import split_sentences, split_words
+
+    text = "Know SQL. Mentor juniors!\nTeam player"
+    words = split_words(text)
+    sents = split_sentences(text, words)
+    assert [[text[slice(*words[i])] for i in s] for s in sents] == [
+        ["Know", "SQL", "."], ["Mentor", "juniors", "!"], ["Team", "player"],
+    ]
