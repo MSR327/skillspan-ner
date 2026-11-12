@@ -37,17 +37,32 @@ docker build -t skillex . && docker run -p 8000:8000 -e MODEL_ID=YOUR_USER/jobbe
 
 ## Results
 
-SkillSpan test set (3,569 sentences), exact span-match, single run (seed 42), Kaggle T4 x2, ~8 min per model.
+SkillSpan **test set** (3,569 sentences), exact span match, micro-F1 over both span types.
+Mean ± std over seeds, Kaggle T4 (~8 min per 5-epoch run). Full logs are in the Kaggle sweep notebook.
 
-| Model | Precision | Recall | **F1** | F1 skill | F1 knowledge |
+| Model | Decoding | Seeds | **F1** | F1 skill | F1 knowledge |
 |---|---|---|---|---|---|
-| bert-base-cased | 0.521 | 0.573 | **0.546** | 0.451 | 0.626 |
-| jobbert-base-cased | 0.549 | 0.629 | **0.586** | 0.494 | 0.667 |
+| bert-base-cased | Viterbi | 2 | 0.558 ± 0.004 | – | – |
+| jobbert-base-cased | argmax | 3 | 0.579 ± 0.007 | – | – |
+| jobbert-base-cased | Viterbi | 3 | 0.598 ± 0.007 | – | – |
+| deberta-v3-base | argmax | 3 | 0.611 | – | – |
+| deberta-v3-base | Viterbi | 3 | 0.625 ± 0.005 | 0.540 | 0.697 |
+| deberta-v3-base, 10 epochs | Viterbi | 2 | 0.632 ± 0.006 | 0.545 | 0.707 |
+| **deberta-v3-base + CRF** | **CRF Viterbi** | 3 | **0.645 ± 0.005** | **0.565** | **0.713** |
 
-Domain-adapted pretraining helps: **+4.0 F1** overall, and both span types improve.
-Recall exceeds precision for both models (over-prediction is the main error), and skills
-(avg 4.3 words) are much harder than knowledge (avg 1.8 words) under exact boundary matching.
-Next: multi-seed runs to confirm the gap, and error analysis on false-positive spans.
+**Reference:** SkillSpan paper (Zhang et al., 2022, Table 5, 5 seeds, CRF): JobBERT 0.597 combined
+(skill 0.561, knowledge 0.639). Their best skill F1 is JobSpanBERT at 0.566. Their combined score follows Benikova et al. (2014),
+so treat the comparison as close but not identical.
+
+What we found:
+- **Our JobBERT reproduces the paper** (0.598 vs 0.597), so the pipeline and metric are sound.
+- **Constrained decoding is free F1.** Viterbi that forbids `O → I` adds about 1.5 to 2 F1 to every model, mostly through precision.
+- **A learned CRF per head adds 2 more F1** over fixed-rule Viterbi (0.645 vs 0.625). It also wins on the **validation** set
+  (0.648 vs 0.617 mean), so this choice was not tuned on test.
+  The CRF model's argmax-only F1 collapses (0.26), as expected: with CRF loss, the emissions are only meaningful together with the transitions.
+- **Training longer helps only a little** (+0.7 F1 at 10 epochs, n=2, within noise). Best epoch was still the last one.
+- We beat the paper on knowledge by a wide margin (+7 F1). On skill we roughly match it (0.565 vs 0.566).
+  Long skill spans (avg 4.3 words) with fuzzy boundaries are the hard part. Annotator agreement is only κ ≈ 0.70 to 0.75.
 
 ## Roadmap (portfolio plan)
 
