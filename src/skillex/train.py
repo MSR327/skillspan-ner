@@ -20,9 +20,10 @@ from transformers import (
     set_seed,
 )
 
+from skillex.crf import BIOCRF, save_crfs
 from skillex.data import load_skillspan, tokenize_dataset
 from skillex.labels import ID2LABEL, LABEL2ID, NUM_OUTPUTS
-from skillex.metrics import compute_metrics
+from skillex.metrics import make_compute_metrics
 from skillex.trainer import TwoHeadTrainer
 
 
@@ -65,6 +66,14 @@ def main() -> None:
         tokenizer.model_max_length, model.config.max_position_embeddings
     )
 
+    use_crf = bool(cfg.get("crf", False))
+    if use_crf:
+        # One CRF per head; as a submodule its params get optimized and checkpointed with the model.
+        model.skillex_crf = torch.nn.ModuleList([BIOCRF(), BIOCRF()])
+        compute_metrics = make_compute_metrics(lambda: [c.to_dict() for c in model.skillex_crf])
+    else:
+        compute_metrics = make_compute_metrics()
+
     raw = load_skillspan(cfg["dataset"])
     if cfg.get("max_samples"):  # quick debug runs
         raw = raw.filter(lambda _, i: i < cfg["max_samples"], with_indices=True)
@@ -84,7 +93,7 @@ def main() -> None:
         save_strategy="epoch",
         save_total_limit=1,
         load_best_model_at_end=True,
-        metric_for_best_model="f1",
+        metric_for_best_model="crf_f1" if use_crf else "f1",
         fp16=cfg.get("fp16", False),
         logging_steps=50,
         report_to=cfg.get("report_to", "none"),
@@ -109,10 +118,19 @@ def main() -> None:
     print(json.dumps(test_metrics, indent=2))
     metrics_dir = Path("metrics")
     metrics_dir.mkdir(exist_ok=True)
-    record = {**test_metrics, "config": cfg}
+    # Validation curve per epoch: lets us justify decoding choices on validation, not test.
+    val_history = [
+        {k: v for k, v in e.items() if k.startswith("eval_") or k == "epoch"}
+        for e in trainer.state.log_history
+        if "eval_f1" in e
+    ]
+    record = {**test_metrics, "config": cfg, "val_history": val_history}
     (metrics_dir / f"{cfg['run_name']}.json").write_text(json.dumps(record, indent=2))
 
     trainer.save_model(str(out_dir / "best"))
+    if use_crf:  # stock HF classes ignore extra modules on load, so store transitions as JSON
+        for d in (out_dir, out_dir / "best"):
+            save_crfs(model.skillex_crf, d)
     # Intermediate checkpoints hold optimizer state (~3x model size); drop them to save disk.
     for ckpt in out_dir.glob("checkpoint-*"):
         shutil.rmtree(ckpt, ignore_errors=True)

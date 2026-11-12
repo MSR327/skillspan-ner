@@ -17,8 +17,9 @@ from transformers import (
     TrainingArguments,
 )
 
+from skillex.crf import load_crfs
 from skillex.data import load_skillspan, tokenize_dataset
-from skillex.metrics import compute_metrics
+from skillex.metrics import make_compute_metrics
 from skillex.trainer import TwoHeadTrainer
 
 
@@ -33,6 +34,7 @@ def main() -> None:
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForTokenClassification.from_pretrained(args.model)
+    crfs = load_crfs(args.model)
     ds = load_skillspan(args.dataset)
     split = ds[args.split]
     if args.limit:
@@ -45,7 +47,7 @@ def main() -> None:
             args=TrainingArguments(output_dir=tmp, per_device_eval_batch_size=32, report_to="none"),
             processing_class=tokenizer,
             data_collator=DataCollatorForTokenClassification(tokenizer),
-            compute_metrics=compute_metrics,
+            compute_metrics=make_compute_metrics((lambda: crfs) if crfs else None),
         )
         metrics = trainer.evaluate(tokenized, metric_key_prefix=args.split)
 

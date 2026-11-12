@@ -13,9 +13,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install ruff pytest numpy
+      - run: pip install ruff pytest numpy && pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: ruff check .
-      - run: pytest -q   # labels + metrics; no model download
+      - run: pytest -q   # labels, metrics, decoding, CRF; no model download
 
   docker:
     runs-on: ubuntu-latest

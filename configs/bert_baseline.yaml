@@ -5,6 +5,7 @@ dataset: jjzha/skillspan
 output_dir: outputs/bert-baseline
 hub_model_id: null
 max_length: 256
+crf: false   # true = learned CRF transitions per head (see crf.py)
 learning_rate: 5.0e-5
 epochs: 5
 batch_size: 16

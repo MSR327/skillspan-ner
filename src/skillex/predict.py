@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from transformers import AutoModelForTokenClassification, AutoTokenizer
 
+from skillex.crf import load_crfs
 from skillex.decode import decode_head
 from skillex.labels import NUM_BIO, TYPES, bio_ids_to_tags, spans_from_tags
 
@@ -19,6 +20,9 @@ class SkillExtractor:
         self, model_id: str, device: str = "cpu", stride: int = 32, decode: str = "viterbi"
     ):
         self.decode = decode  # "viterbi" (BIO-constrained, +1.9 F1 in sweep) or "argmax"
+        self.crfs = load_crfs(model_id)  # learned transitions if trained with crf: true
+        if self.crfs and decode == "viterbi":
+            self.decode = "crf"
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.model = AutoModelForTokenClassification.from_pretrained(model_id).to(device).eval()
         self.max_length = min(
@@ -64,7 +68,7 @@ class SkillExtractor:
         for h, etype in enumerate(TYPES):
             head = torch.stack([best[i][1][h * NUM_BIO : (h + 1) * NUM_BIO] for i in order])
             word_probs = head.softmax(-1)
-            ids = decode_head(head.numpy(), self.decode)
+            ids = decode_head(head.numpy(), self.decode, self.crfs[h] if self.crfs else None)
             tags = bio_ids_to_tags(ids, etype)
             for s in spans_from_tags([""] * len(order), tags):
                 c0, c1 = char_span[order[s["start"]]][0], char_span[order[s["end"] - 1]][1]
