@@ -1,0 +1,10 @@
+.venv/
+outputs/
+wandb/
+__pycache__/
+*.egg-info/
+.cache/
+.pytest_cache/
+.ruff_cache/
+metrics/
+.DS_Store

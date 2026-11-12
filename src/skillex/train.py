@@ -1,0 +1,96 @@
+"""Fine-tune a token-classification model on SkillSpan.
+
+    python -m skillex.train --config configs/jobbert.yaml
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import yaml
+from transformers import (
+    AutoModelForTokenClassification,
+    AutoTokenizer,
+    DataCollatorForTokenClassification,
+    TrainingArguments,
+    set_seed,
+)
+
+from skillex.data import load_skillspan, tokenize_dataset
+from skillex.labels import ID2LABEL, LABEL2ID, NUM_OUTPUTS
+from skillex.metrics import compute_metrics
+from skillex.trainer import TwoHeadTrainer
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
+    args = parser.parse_args()
+    cfg = yaml.safe_load(Path(args.config).read_text())
+
+    set_seed(cfg["seed"])
+    tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"])
+    model = AutoModelForTokenClassification.from_pretrained(
+        cfg["base_model"], num_labels=NUM_OUTPUTS, id2label=ID2LABEL, label2id=LABEL2ID
+    )
+    # Some tokenizers (incl. JobBERT's) ship without model_max_length; without it the
+    # inference pipeline won't chunk long job posts and BERT crashes past 512 tokens.
+    tokenizer.model_max_length = min(
+        tokenizer.model_max_length, model.config.max_position_embeddings
+    )
+
+    raw = load_skillspan(cfg["dataset"])
+    if cfg.get("max_samples"):  # quick debug runs
+        raw = raw.filter(lambda _, i: i < cfg["max_samples"], with_indices=True)
+    ds = tokenize_dataset(raw, tokenizer, cfg["max_length"])
+
+    out_dir = Path(cfg["output_dir"])
+    training_args = TrainingArguments(
+        output_dir=str(out_dir),
+        run_name=cfg["run_name"],
+        learning_rate=cfg["learning_rate"],
+        num_train_epochs=cfg["epochs"],
+        per_device_train_batch_size=cfg["batch_size"],
+        per_device_eval_batch_size=cfg["batch_size"] * 2,
+        weight_decay=cfg["weight_decay"],
+        warmup_steps=cfg["warmup_ratio"],  # transformers 5.x: float in [0,1) = ratio
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=1,
+        load_best_model_at_end=True,
+        metric_for_best_model="f1",
+        fp16=cfg.get("fp16", False),
+        logging_steps=50,
+        report_to=cfg.get("report_to", "none"),
+        push_to_hub=bool(cfg.get("hub_model_id")),
+        hub_model_id=cfg.get("hub_model_id"),
+        seed=cfg["seed"],
+    )
+
+    trainer = TwoHeadTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=ds["train"],
+        eval_dataset=ds["validation"],
+        processing_class=tokenizer,
+        data_collator=DataCollatorForTokenClassification(tokenizer),
+        compute_metrics=compute_metrics,
+    )
+    trainer.train()
+
+    # Validation picked the checkpoint; test is touched exactly once, here.
+    test_metrics = trainer.evaluate(ds["test"], metric_key_prefix="test")
+    print(json.dumps(test_metrics, indent=2))
+    metrics_dir = Path("metrics")
+    metrics_dir.mkdir(exist_ok=True)
+    (metrics_dir / f"{cfg['run_name']}.json").write_text(json.dumps(test_metrics, indent=2))
+
+    trainer.save_model(str(out_dir / "best"))
+    if training_args.push_to_hub:
+        trainer.push_to_hub(commit_message=f"{cfg['run_name']}: test f1={test_metrics['test_f1']:.4f}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,4 @@
+transformers>=5.0
+torch
+gradio>=4.44
+skillex @ git+https://github.com/MSR327/skillspan-ner.git

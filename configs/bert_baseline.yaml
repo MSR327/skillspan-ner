@@ -1,0 +1,15 @@
+# Baseline: same setup, generic BERT. Compare against configs/jobbert.yaml.
+run_name: bert-baseline
+base_model: bert-base-cased
+dataset: jjzha/skillspan
+output_dir: outputs/bert-baseline
+hub_model_id: null
+max_length: 256
+learning_rate: 5.0e-5
+epochs: 5
+batch_size: 16
+weight_decay: 0.01
+warmup_ratio: 0.1
+fp16: true
+report_to: none
+seed: 42

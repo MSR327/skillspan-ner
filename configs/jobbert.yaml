@@ -1,0 +1,16 @@
+# Domain-adapted model: BERT further pretrained on job postings.
+run_name: jobbert
+base_model: jjzha/jobbert-base-cased
+dataset: jjzha/skillspan
+output_dir: outputs/jobbert
+# Set to "YOUR_HF_USERNAME/jobbert-skill-extractor" to push to the Hub after training.
+hub_model_id: null
+max_length: 256
+learning_rate: 5.0e-5
+epochs: 5
+batch_size: 16
+weight_decay: 0.01
+warmup_ratio: 0.1
+fp16: true   # set false on CPU / Apple Silicon
+report_to: none   # "wandb" once you've run `wandb login`
+seed: 42
