@@ -52,9 +52,15 @@ def main() -> None:
         metrics = trainer.evaluate(tokenized, metric_key_prefix=args.split)
 
     print(json.dumps(metrics, indent=2))
-    f1 = metrics[f"{args.split}_f1"]
+    # Gate on the decoder the model actually ships with: CRF > Viterbi > argmax.
+    # (A CRF-trained model's argmax F1 is meaningless on its own.)
+    key = next(
+        f"{args.split}_{k}" for k in ("crf_f1", "vit_f1", "f1") if f"{args.split}_{k}" in metrics
+    )
+    f1 = metrics[key]
+    print(f"gate metric {key} = {f1:.4f}")
     if args.min_f1 is not None and f1 < args.min_f1:
-        print(f"EVAL GATE FAILED: f1={f1:.4f} < {args.min_f1}", file=sys.stderr)
+        print(f"EVAL GATE FAILED: {key}={f1:.4f} < {args.min_f1}", file=sys.stderr)
         sys.exit(1)
 
 

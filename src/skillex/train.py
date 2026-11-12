@@ -97,8 +97,6 @@ def main() -> None:
         fp16=cfg.get("fp16", False),
         logging_steps=50,
         report_to=cfg.get("report_to", "none"),
-        push_to_hub=bool(cfg.get("hub_model_id")),
-        hub_model_id=cfg.get("hub_model_id"),
         seed=cfg["seed"],
     )
 
@@ -134,8 +132,24 @@ def main() -> None:
     # Intermediate checkpoints hold optimizer state (~3x model size); drop them to save disk.
     for ckpt in out_dir.glob("checkpoint-*"):
         shutil.rmtree(ckpt, ignore_errors=True)
-    if training_args.push_to_hub:
-        trainer.push_to_hub(commit_message=f"{cfg['run_name']}: test f1={test_metrics['test_f1']:.4f}")
+    if cfg.get("hub_model_id"):
+        push_best(out_dir / "best", cfg["hub_model_id"], test_metrics, cfg["run_name"])
+
+
+def push_best(best_dir: Path, repo_id: str, test_metrics: dict, run_name: str) -> None:
+    """Upload only the selected checkpoint (+ CRF json), not every epoch's checkpoint.
+
+    Auth comes from the HF_TOKEN environment variable (a Kaggle secret), never from code.
+    """
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    api.create_repo(repo_id, exist_ok=True)
+    f1 = test_metrics.get("test_crf_f1", test_metrics.get("test_vit_f1", test_metrics["test_f1"]))
+    api.upload_folder(
+        repo_id=repo_id, folder_path=str(best_dir), commit_message=f"{run_name}: test F1 {f1:.4f}"
+    )
+    print(f"pushed {best_dir} -> https://huggingface.co/{repo_id}")
 
 
 if __name__ == "__main__":
