@@ -37,10 +37,17 @@ docker build -t skillex . && docker run -p 8000:8000 -e MODEL_ID=YOUR_USER/jobbe
 
 ## Results
 
-| Model | Test F1 | F1 skill | F1 knowledge |
-|---|---|---|---|
-| bert-base-cased | _run it_ | | |
-| jobbert-base-cased | _run it_ | | |
+SkillSpan test set (3,569 sentences), exact span-match, single run (seed 42), Kaggle T4 x2, ~8 min per model.
+
+| Model | Precision | Recall | **F1** | F1 skill | F1 knowledge |
+|---|---|---|---|---|---|
+| bert-base-cased | 0.521 | 0.573 | **0.546** | 0.451 | 0.626 |
+| jobbert-base-cased | 0.549 | 0.629 | **0.586** | 0.494 | 0.667 |
+
+Domain-adapted pretraining helps: **+4.0 F1** overall, and both span types improve.
+Recall exceeds precision for both models (over-prediction is the main error), and skills
+(avg 4.3 words) are much harder than knowledge (avg 1.8 words) under exact boundary matching.
+Next: multi-seed runs to confirm the gap, and error analysis on false-positive spans.
 
 ## Roadmap (portfolio plan)
 
