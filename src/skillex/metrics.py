@@ -2,13 +2,15 @@
 
 Same rule as seqeval's default (a span counts only if type, start and end all
 match), but it can score SKILL and KNOWLEDGE independently, so overlapping
-spans are counted correctly.
+spans are counted correctly. Reports both argmax and Viterbi (BIO-constrained)
+decoding; plain keys are argmax, `vit_*` keys are Viterbi.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
+from skillex.decode import decode_head
 from skillex.labels import IGNORE_INDEX, NUM_BIO, TYPES, bio_ids_to_tags, spans_from_tags
 
 
@@ -19,17 +21,21 @@ def _prf(tp: int, n_pred: int, n_gold: int) -> tuple[float, float, float]:
     return p, r, f
 
 
-def span_scores(logits: np.ndarray, label_ids: np.ndarray) -> dict:
+def _span_set(ids: list[int], etype: str) -> set[tuple[int, int]]:
+    tags = bio_ids_to_tags(ids, etype)
+    return {(s["start"], s["end"]) for s in spans_from_tags([""] * len(tags), tags)}
+
+
+def span_scores(logits: np.ndarray, label_ids: np.ndarray, decode: str = "argmax") -> dict:
     """logits: [N, L, 6]; label_ids: [N, L] packed (skill*3+knowledge) or IGNORE_INDEX."""
     counts = {t: [0, 0, 0] for t in TYPES}  # tp, n_pred, n_gold
     for h, etype in enumerate(TYPES):
-        preds = logits[..., h * NUM_BIO : (h + 1) * NUM_BIO].argmax(-1)
-        for pred_row, label_row in zip(preds, label_ids):
+        head_logits = logits[..., h * NUM_BIO : (h + 1) * NUM_BIO]
+        for row_logits, label_row in zip(head_logits, label_ids):
             keep = label_row != IGNORE_INDEX
             gold_ids = (label_row[keep] // NUM_BIO) if h == 0 else (label_row[keep] % NUM_BIO)
-            dummy = [""] * int(keep.sum())
-            gold = {(s["start"], s["end"]) for s in spans_from_tags(dummy, bio_ids_to_tags(gold_ids.tolist(), etype))}
-            pred = {(s["start"], s["end"]) for s in spans_from_tags(dummy, bio_ids_to_tags(pred_row[keep].tolist(), etype))}
+            gold = _span_set(gold_ids.tolist(), etype)
+            pred = _span_set(decode_head(row_logits[keep], decode), etype)
             c = counts[etype]
             c[0] += len(gold & pred)
             c[1] += len(pred)
@@ -46,5 +52,8 @@ def span_scores(logits: np.ndarray, label_ids: np.ndarray) -> dict:
 
 
 def compute_metrics(eval_pred) -> dict:
-    logits, label_ids = eval_pred
-    return span_scores(np.asarray(logits), np.asarray(label_ids))
+    logits, label_ids = (np.asarray(x) for x in eval_pred)
+    out = span_scores(logits, label_ids, "argmax")
+    vit = span_scores(logits, label_ids, "viterbi")
+    out |= {f"vit_{k}": v for k, v in vit.items()}
+    return out

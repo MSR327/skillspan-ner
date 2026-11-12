@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 from transformers import AutoModelForTokenClassification, AutoTokenizer
 
+from skillex.decode import decode_head
 from skillex.labels import NUM_BIO, TYPES, bio_ids_to_tags, spans_from_tags
 
 
@@ -14,7 +15,10 @@ class SkillExtractor:
     Each word is labeled by its first subword, matching training.
     """
 
-    def __init__(self, model_id: str, device: str = "cpu", stride: int = 32):
+    def __init__(
+        self, model_id: str, device: str = "cpu", stride: int = 32, decode: str = "argmax"
+    ):
+        self.decode = decode  # "argmax" or "viterbi" (BIO-constrained)
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.model = AutoModelForTokenClassification.from_pretrained(model_id).to(device).eval()
         self.max_length = min(
@@ -53,19 +57,18 @@ class SkillExtractor:
                 edge = min(rank, len(real) - 1 - rank)
                 if wid in best and best[wid][0] >= edge:
                     continue
-                heads = []
-                for h in range(len(TYPES)):
-                    p = probs[w, t, h * NUM_BIO : (h + 1) * NUM_BIO].softmax(-1)
-                    heads.append((int(p.argmax()), float(p.max())))
-                best[wid] = (edge, heads)
+                best[wid] = (edge, probs[w, t])
 
         order = sorted(best)
         spans = []
         for h, etype in enumerate(TYPES):
-            tags = bio_ids_to_tags([best[i][1][h][0] for i in order], etype)
+            head = torch.stack([best[i][1][h * NUM_BIO : (h + 1) * NUM_BIO] for i in order])
+            word_probs = head.softmax(-1)
+            ids = decode_head(head.numpy(), self.decode)
+            tags = bio_ids_to_tags(ids, etype)
             for s in spans_from_tags([""] * len(order), tags):
                 c0, c1 = char_span[order[s["start"]]][0], char_span[order[s["end"] - 1]][1]
-                score = sum(best[order[j]][1][h][1] for j in range(s["start"], s["end"]))
+                score = sum(float(word_probs[j, ids[j]]) for j in range(s["start"], s["end"]))
                 spans.append(
                     {
                         "type": etype,

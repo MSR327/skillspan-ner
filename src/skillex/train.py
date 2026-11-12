@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 
 import yaml
@@ -27,8 +28,24 @@ from skillex.trainer import TwoHeadTrainer
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument(
+        "--set", nargs="*", default=[], metavar="KEY=VALUE",
+        help="Override config values, e.g. --set seed=43 learning_rate=3e-5",
+    )
     args = parser.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text())
+    for item in args.set:
+        key, _, value = item.partition("=")
+        if key not in cfg and key != "max_samples":
+            raise SystemExit(f"--set: unknown config key {key!r}")
+        parsed = yaml.safe_load(value)  # "true" -> bool, "8" -> int, ...
+        if isinstance(parsed, str):
+            try:  # PyYAML (YAML 1.1) reads "3e-5" as a string; we want a float
+                parsed = float(parsed)
+            except ValueError:
+                pass
+        cfg[key] = parsed
+    print("config:", json.dumps(cfg))
 
     set_seed(cfg["seed"])
     tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"])
@@ -85,9 +102,13 @@ def main() -> None:
     print(json.dumps(test_metrics, indent=2))
     metrics_dir = Path("metrics")
     metrics_dir.mkdir(exist_ok=True)
-    (metrics_dir / f"{cfg['run_name']}.json").write_text(json.dumps(test_metrics, indent=2))
+    record = {**test_metrics, "config": cfg}
+    (metrics_dir / f"{cfg['run_name']}.json").write_text(json.dumps(record, indent=2))
 
     trainer.save_model(str(out_dir / "best"))
+    # Intermediate checkpoints hold optimizer state (~3x model size); drop them to save disk.
+    for ckpt in out_dir.glob("checkpoint-*"):
+        shutil.rmtree(ckpt, ignore_errors=True)
     if training_args.push_to_hub:
         trainer.push_to_hub(commit_message=f"{cfg['run_name']}: test f1={test_metrics['test_f1']:.4f}")
 

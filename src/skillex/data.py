@@ -12,7 +12,8 @@ def load_skillspan(name: str = "jjzha/skillspan") -> DatasetDict:
     def _pack(ex):
         return {"ner_tags": encode_pair(ex["tags_skill"], ex["tags_knowledge"])}
 
-    return ds.map(_pack, remove_columns=["tags_skill", "tags_knowledge"])
+    # keep_in_memory: no cache files, so parallel training processes can't race on them.
+    return ds.map(_pack, remove_columns=["tags_skill", "tags_knowledge"], keep_in_memory=True)
 
 
 def tokenize_dataset(ds: DatasetDict, tokenizer, max_length: int = 256) -> DatasetDict:
@@ -27,5 +28,8 @@ def tokenize_dataset(ds: DatasetDict, tokenizer, max_length: int = 256) -> Datas
 
     ds = DatasetDict(ds)  # also accepts a plain {split: Dataset} dict
     return DatasetDict(
-        {name: split.map(_tok, batched=True, remove_columns=split.column_names) for name, split in ds.items()}
+        {
+            name: split.map(_tok, batched=True, remove_columns=split.column_names, keep_in_memory=True)
+            for name, split in ds.items()
+        }
     )
