@@ -10,6 +10,7 @@ import json
 import shutil
 from pathlib import Path
 
+import torch
 import yaml
 from transformers import (
     AutoModelForTokenClassification,
@@ -50,7 +51,13 @@ def main() -> None:
     set_seed(cfg["seed"])
     tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"])
     model = AutoModelForTokenClassification.from_pretrained(
-        cfg["base_model"], num_labels=NUM_OUTPUTS, id2label=ID2LABEL, label2id=LABEL2ID
+        cfg["base_model"],
+        num_labels=NUM_OUTPUTS,
+        id2label=ID2LABEL,
+        label2id=LABEL2ID,
+        # Some checkpoints (e.g. deberta-v3-base) are stored in fp16 and transformers 5 keeps
+        # that dtype; fp16 mixed precision needs fp32 master weights or GradScaler crashes.
+        dtype=torch.float32,
     )
     # Some tokenizers (incl. JobBERT's) ship without model_max_length; without it the
     # inference pipeline won't chunk long job posts and BERT crashes past 512 tokens.
