@@ -1,7 +1,8 @@
 # skillex: skill extraction from job postings
 
 Fine-tunes a transformer to extract **skills** and **knowledge** spans from job ads,
-then ships it ([model on the Hub](https://huggingface.co/srish327/deberta-v3-skillspan-crf)): FastAPI + Docker service, Prometheus metrics, CI with an eval gate,
+then ships it. **[Live demo](https://huggingface.co/spaces/srish327/skill-extractor)** (runs fully in your browser) · [model on the Hub](https://huggingface.co/srish327/deberta-v3-skillspan-crf).
+Also included: FastAPI + Docker service, Prometheus metrics, CI with an eval gate,
 and a live Gradio demo on Hugging Face Spaces.
 
 **Research question:** does domain-adapted pretraining (JobBERT) beat generic BERT on skill extraction?
@@ -63,6 +64,23 @@ What we found:
 - **Training longer helps only a little** (+0.7 F1 at 10 epochs, n=2, within noise). Best epoch was still the last one.
 - We beat the paper on knowledge by a wide margin (+7 F1). On skill we roughly match it (0.565 vs 0.566).
   Long skill spans (avg 4.3 words) with fuzzy boundaries are the hard part. Annotator agreement is only κ ≈ 0.70 to 0.75.
+
+## In-browser demo (no server)
+
+The [demo Space](https://huggingface.co/spaces/srish327/skill-extractor) runs the model client-side: transformers.js tokenizer,
+onnxruntime-web, and CRF Viterbi decoding in JavaScript (`space_static/extract.js`). Getting a 736 MB DeBERTa small enough for a browser,
+measured on the full test set (`scripts/export_onnx.py`):
+
+| Browser build | Size | Test F1 (CRF) |
+|---|---|---|
+| fp32 ONNX (matches PyTorch to 3e-5) | 736 MB | 0.6318 |
+| default dynamic int8 (all MatMuls) | 243 MB | **0.0009** (broken: attention MatMuls can't take int8) |
+| int8 on dense weights + embeddings only | 244 MB | 0.584 (batch 1), 0.503 (padded batches) |
+| **int8 embeddings + fp16-stored weights, fp32 compute** | **271 MB** | **0.6309** |
+
+The JS pipeline agrees with Python on 99.4% of spans (`scripts/js_parity.mjs`). Two bugs this check caught:
+transformers.js leaves out SentencePiece's word-start marker for single words, so every token ID was wrong,
+and dynamic int8 activation scales get distorted by padding.
 
 ## Roadmap (portfolio plan)
 

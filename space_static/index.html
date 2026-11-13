@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skill Extractor</title>
+<style>
+  :root {
+    --bg: #fafaf9; --panel: #ffffff; --text: #1c1917; --muted: #78716c; --border: #e7e5e4;
+    --skill: #15803d; --skill-bg: #dcfce7; --know: #1d4ed8; --know-bg: #dbeafe; --accent: #1c1917;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0c0a09; --panel: #1c1917; --text: #f5f5f4; --muted: #a8a29e; --border: #292524;
+      --skill: #86efac; --skill-bg: #14532d; --know: #93c5fd; --know-bg: #1e3a8a; --accent: #f5f5f4;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .sub a { color: inherit; }
+  textarea { width: 100%; min-height: 170px; padding: 12px; border: 1px solid var(--border); border-radius: 10px;
+             background: var(--panel); color: var(--text); font: inherit; resize: vertical; }
+  .row { display: flex; gap: 12px; align-items: center; margin: 12px 0 24px; flex-wrap: wrap; }
+  button { background: var(--accent); color: var(--bg); border: 0; border-radius: 8px; padding: 10px 18px;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  #status { color: var(--muted); font-size: 14px; }
+  .bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; flex: 1 1 160px; max-width: 260px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .hl { white-space: pre-wrap; }
+  mark { border-radius: 4px; padding: 1px 2px; }
+  mark.SKILL { background: var(--skill-bg); color: var(--skill); }
+  mark.KNOWLEDGE { background: var(--know-bg); color: var(--know); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border-radius: 999px; padding: 3px 10px; font-size: 14px; }
+  .chip.SKILL { background: var(--skill-bg); color: var(--skill); }
+  .chip.KNOWLEDGE { background: var(--know-bg); color: var(--know); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .empty { color: var(--muted); font-size: 14px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Job Posting Skill Extractor</h1>
+  <p class="sub">
+    Finds <b style="color:var(--skill)">skills</b> (what you can do) and
+    <b style="color:var(--know)">knowledge</b> (what you know) in a job posting. The model is DeBERTa-v3 with two BIO heads and a learned CRF,
+    fine-tuned on SkillSpan (test span F1 0.645 ± 0.005).
+    <b>It runs entirely in your browser</b>, so your text never leaves this page.
+    <a href="https://huggingface.co/srish327/deberta-v3-skillspan-crf">Model</a> ·
+    <a href="https://github.com/MSR327/skillspan-ner">Code</a>
+  </p>
+
+  <textarea id="text">We are looking for a Data Engineer with strong Python and SQL experience. You will design ETL pipelines on AWS, collaborate with stakeholders, and mentor junior engineers.
+Requirements:
+- 3+ years of experience with Kubernetes and Terraform
+- Excellent communication skills
+- Ability to prioritize tasks in a fast-paced environment
+Nice to have: Kafka, dbt</textarea>
+  <div class="row">
+    <button id="go" disabled>Extract</button>
+    <div class="bar"><div id="prog"></div></div>
+    <span id="status">Loading model (243 MB, cached after the first visit)…</span>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h2>Skills</h2><div id="skills" class="chips"></div></div>
+    <div class="card"><h2>Knowledge</h2><div id="knowledge" class="chips"></div></div>
+  </div>
+  <div class="card"><h2>Skills in context</h2><div id="hl-skill" class="hl empty">—</div></div>
+  <div class="card"><h2>Knowledge in context</h2><div id="hl-know" class="hl empty">—</div></div>
+
+  <footer>Skill and knowledge spans can overlap, so each is shown separately. Model is int8-quantized ONNX, run with onnxruntime-web.
+  Not intended for automated hiring decisions.</footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+<script type="module">
+import { AutoTokenizer } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1";
+import { extract } from "./extract.js";
+
+const REPO = "srish327/deberta-v3-skillspan-crf";
+const BASE = `https://huggingface.co/${REPO}/resolve/main/`;
+const MODEL_URL = BASE + "onnx/model_quantized.onnx";
+
+const $ = (id) => document.getElementById(id);
+const status = (s) => ($("status").textContent = s);
+
+async function fetchWithProgress(url) {
+  let cache = null;
+  try { cache = await caches.open("skill-extractor-v1"); const hit = await cache.match(url);
+        if (hit) { $("prog").style.width = "100%"; return await hit.arrayBuffer(); } } catch {}
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`download failed: ${res.status}`);
+  const total = +res.headers.get("content-length") || 0, reader = res.body.getReader(), parts = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read(); if (done) break;
+    parts.push(value); got += value.length;
+    if (total) { $("prog").style.width = `${(100 * got) / total}%`;
+                 status(`Loading model… ${Math.round(got / 1e6)} / ${Math.round(total / 1e6)} MB`); }
+  }
+  const buf = await new Blob(parts).arrayBuffer();
+  try { await cache?.put(url, new Response(buf.slice(0))); } catch {}
+  return buf;
+}
+
+let tok, session, crfs;
+async function load() {
+  ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+  [tok, crfs] = await Promise.all([
+    AutoTokenizer.from_pretrained(REPO),
+    fetch(BASE + "skillex_crf.json").then((r) => r.json()),
+  ]);
+  const buf = await fetchWithProgress(MODEL_URL);
+  status("Starting model…");
+  session = await ort.InferenceSession.create(buf, { executionProviders: ["wasm"] });
+  status("Ready. Paste a job posting and click Extract.");
+  $("go").disabled = false;
+}
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function highlight(text, spans, type) {
+  let html = "", pos = 0;
+  for (const s of spans.filter((x) => x.type === type).sort((a, b) => a.start - b.start)) {
+    html += esc(text.slice(pos, s.start)) + `<mark class="${type}">${esc(text.slice(s.start, s.end))}</mark>`;
+    pos = s.end;
+  }
+  return html + esc(text.slice(pos));
+}
+function chips(el, text, spans, type) {
+  const uniq = [...new Set(spans.filter((s) => s.type === type).map((s) => text.slice(s.start, s.end)))];
+  el.innerHTML = uniq.length ? uniq.map((u) => `<span class="chip ${type}">${esc(u)}</span>`).join("")
+                             : `<span class="empty">none found</span>`;
+}
+
+$("go").onclick = async () => {
+  const text = $("text").value; $("go").disabled = true; status("Running…");
+  try {
+    const t0 = performance.now(), spans = await extract({ ort, tok, session, crfs }, text);
+    chips($("skills"), text, spans, "SKILL"); chips($("knowledge"), text, spans, "KNOWLEDGE");
+    for (const [id, type] of [["hl-skill", "SKILL"], ["hl-know", "KNOWLEDGE"]]) {
+      $(id).classList.remove("empty"); $(id).innerHTML = highlight(text, spans, type);
+    }
+    status(`Done in ${Math.round(performance.now() - t0)} ms, ${spans.length} spans.`);
+  } catch (e) { status("Error: " + e.message); console.error(e); }
+  $("go").disabled = false;
+};
+load().catch((e) => { status("Failed to load model: " + e.message); console.error(e); });
+</script>
+</body>
+</html>

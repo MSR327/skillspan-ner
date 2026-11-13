@@ -21,7 +21,7 @@ model-index:
 Extracts **skills** (e.g. "mentor junior engineers") and **knowledge** (e.g. "Python", "AWS")
 spans from English job postings. Skill and knowledge spans can overlap.
 
-- **Demo:** {{SPACE_URL}}
+- **Demo:** {{SPACE_URL}} (runs in your browser, using `onnx/model_quantized.onnx`: 271 MB, test F1 0.6309 vs 0.6318 for fp32)
 - **Code, training, experiments & CI:** https://github.com/MSR327/skillspan-ner
 
 ## Usage
