@@ -70,7 +70,7 @@ def test_span_scores_partial_boundary_is_wrong():
 
 
 def test_split_words_matches_skillspan_style():
-    from skillex.predict import split_words
+    from skillex.text import split_words
 
     text = "Python, AWS and Node.js; mentor juniors."
     assert [text[a:b] for a, b in split_words(text)] == [
@@ -79,7 +79,7 @@ def test_split_words_matches_skillspan_style():
 
 
 def test_split_sentences_breaks_on_punctuation_and_newlines():
-    from skillex.predict import split_sentences, split_words
+    from skillex.text import split_sentences, split_words
 
     text = "Know SQL. Mentor juniors!\nTeam player"
     words = split_words(text)

@@ -1,5 +1,5 @@
 // Core extraction logic, shared by index.html and the Node parity test (scripts/js_parity.mjs).
-// Same word/sentence splitting as skillex/predict.py (matches SkillSpan's training tokens).
+// Same word/sentence splitting as skillex/text.py (matches SkillSpan's training tokens).
 const WORD = /[\p{L}\p{N}_\p{M}]+(?:['’.\-][\p{L}\p{N}_\p{M}]+)*|\S/gu;
 export const splitWords = (text) => [...text.matchAll(WORD)].map((m) => [m.index, m.index + m[0].length]);
 export function splitSentences(text, words) {
