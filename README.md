@@ -63,7 +63,9 @@ What we found:
   The CRF model's argmax-only F1 collapses (0.26), as expected: with CRF loss, the emissions are only meaningful together with the transitions.
 - **Training longer helps only a little** (+0.7 F1 at 10 epochs, n=2, within noise). Best epoch was still the last one.
 - We beat the paper on knowledge by a wide margin (+7 F1). On skill we roughly match it (0.565 vs 0.566).
-  Long skill spans (avg 4.3 words) with fuzzy boundaries are the hard part. Annotator agreement is only κ ≈ 0.70 to 0.75.
+- **Error analysis** ([notebook](notebooks/error_analysis.ipynb)): skill F1 is 0.54 exact but **0.82 lenient** (any overlap), so the model finds skills
+  and gets the boundaries wrong. The main error is spans that run **too long** (24.5% of gold skills), typically a whole coordinated list tagged as one skill.
+  Short skills (1 to 3 words) are hit hardest, not long ones. Many knowledge "false positives" (DevOps, TDD, ITIL) look like annotation gaps.
 
 ## In-browser demo (no server)
 
