@@ -47,13 +47,19 @@ class OnnxSkillExtractor:
         batch_size: int = 8,
         max_length: int = 512,
         threads: int | None = None,
+        low_memory: bool = False,
     ):
+        """`low_memory=True` turns off ONNX Runtime graph optimization. The file stores weights
+        as fp16 + Cast nodes; constant folding would pre-compute those casts and rebuild the full
+        fp32 model in RAM (~750 MB vs ~500 MB), for ~20% faster inference."""
         import onnxruntime as ort
         from transformers import AutoTokenizer
 
         opts = ort.SessionOptions()
         if threads:
             opts.intra_op_num_threads = threads
+        if low_memory:
+            opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
         self.session = ort.InferenceSession(
             str(_file(model_id, onnx_file)), opts, providers=["CPUExecutionProvider"]
         )
