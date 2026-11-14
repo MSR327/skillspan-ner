@@ -19,7 +19,12 @@ class SkillExtractor:
     """
 
     def __init__(
-        self, model_id: str, device: str = "cpu", stride: int = 32, decode: str = "viterbi"
+        self,
+        model_id: str,
+        device: str = "cpu",
+        stride: int = 32,
+        decode: str = "viterbi",
+        batch_size: int = 16,
     ):
         self.decode = decode  # "viterbi" (BIO-constrained, +1.9 F1 in sweep) or "argmax"
         self.crfs = load_crfs(model_id)  # learned transitions if trained with crf: true
@@ -30,7 +35,7 @@ class SkillExtractor:
         self.max_length = min(
             self.tokenizer.model_max_length, self.model.config.max_position_embeddings
         )
-        self.device, self.stride = device, stride
+        self.device, self.stride, self.batch_size = device, stride, batch_size
 
     @torch.inference_mode()
     def extract(self, text: str) -> dict:
@@ -49,7 +54,15 @@ class SkillExtractor:
             return_tensors="pt",
         )
         window_sent = enc.pop("overflow_to_sample_mapping").tolist()
-        probs = self.model(**{k: v.to(self.device) for k, v in enc.items()}).logits.cpu()
+        # Run sentences in small batches: a long posting (~150 sentences) in one forward
+        # pass runs out of GPU memory. Each batch is trimmed to its own longest sentence.
+        n_win, width = enc["input_ids"].shape
+        probs = torch.zeros(n_win, width, self.model.config.num_labels)
+        for b in range(0, n_win, self.batch_size):
+            rows = slice(b, b + self.batch_size)
+            n = int(enc["attention_mask"][rows].sum(1).max())
+            batch = {k: v[rows, :n].to(self.device) for k, v in enc.items()}
+            probs[rows, :n] = self.model(**batch).logits.float().cpu()
 
         best: dict[int, tuple[int, list]] = {}  # global word -> (edge distance, logits)
         for w in range(probs.shape[0]):
