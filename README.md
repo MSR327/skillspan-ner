@@ -84,6 +84,11 @@ The JS pipeline agrees with Python on 99.4% of spans (`scripts/js_parity.mjs`). 
 transformers.js leaves out SentencePiece's word-start marker for single words, so every token ID was wrong,
 and dynamic int8 activation scales get distorted by padding.
 
+**Torch-free Python** (for small CPU hosts): `pip install "skillex[onnx] @ git+https://github.com/MSR327/skillspan-ner.git"`, then
+`from skillex.onnx_predict import OnnxSkillExtractor`. Same windowing and CRF decoding in numpy; on 40 real postings it
+agrees with the PyTorch extractor on 99.5% of spans (0.95 s vs 0.88 s per posting on a laptop CPU).
+It powers the skill matching in [resume-job-matcher](https://github.com/MSR327/resume-job-matcher).
+
 ## Roadmap (portfolio plan)
 
 - [ ] **Week 1:** train both configs, push the best to the Hub (`hub_model_id` in config), fill in `MODEL_CARD.md`, publish

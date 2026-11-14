@@ -12,6 +12,7 @@ dependencies = ["transformers>=5.0", "numpy"]
 
 [project.optional-dependencies]
 train = ["torch", "datasets>=2.20", "accelerate>=1.1", "pyyaml", "wandb"]
+onnx = ["onnxruntime>=1.17", "huggingface_hub"]
 serve = ["torch", "fastapi>=0.110", "uvicorn[standard]", "prometheus-fastapi-instrumentator>=7"]
 dev = ["pytest", "ruff"]
 
